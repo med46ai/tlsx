@@ -1,0 +1,37 @@
+# Git files
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+README.md
+CLAUDE.md
+LICENSE
+
+# Build artifacts
+*.exe
+*.so
+*.dylib
+tlsx-api
+tlsx
+
+# IDE
+.vscode
+.idea
+
+# Test files
+*_test.go
+tests/
+
+# Cloud Build
+cloudbuild.yaml
+
+# Scripts
+*.sh
+install-gcloud.sh
+setup-api.sh
+
+# CI/CD
+.travis.yml
+.gitlab-ci.yml

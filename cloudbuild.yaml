@@ -1,0 +1,41 @@
+# Cloud Build configuration for tlsx API server
+# Builds Docker image and deploys to Cloud Run
+
+steps:
+  # Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/tlsx-api/tlsx-api:$SHORT_SHA'
+      - '-f'
+      - 'Dockerfile.api'
+      - '.'
+
+  # Push image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/tlsx-api/tlsx-api:$SHORT_SHA'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'tlsx-api'
+      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/tlsx-api/tlsx-api:$SHORT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=512Mi'
+      - '--port=8080'
+
+# Substitutions for dynamic values
+substitutions:
+  _ARTIFACT_REPO: 'tlsx-api'
+
+# Images to be pushed to registry
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/tlsx-api/tlsx-api:$SHORT_SHA'

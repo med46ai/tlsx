@@ -1,0 +1,56 @@
+# Multi-stage build for Quantok tlsx API server
+# Go 1.24-alpine with static binary compilation
+
+# Stage 1: Builder
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+# Set build environment for static binary
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
+
+# Copy dependency files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the tlsx CLI binary (required for API to call)
+RUN go build -ldflags="-s -w" -o /usr/local/bin/tlsx cmd/tlsx/main.go
+
+# Build the API server binary
+RUN go build -ldflags="-s -w" -o tlsx-api cmd/api/main.go
+
+# Stage 2: Runtime
+FROM alpine:3.20
+
+# Install CA certificates for HTTPS requests
+RUN apk add --no-cache ca-certificates curl
+
+WORKDIR /app
+
+# Create non-root user
+RUN addgroup -S nonroot && adduser -S -D nonroot -G nonroot
+
+# Copy binaries from builder stage
+COPY --from=builder --chown=nonroot:nonroot /app/tlsx-api /app/tlsx-api
+COPY --from=builder --chown=nonroot:nonroot /usr/local/bin/tlsx /usr/local/bin/tlsx
+
+# Switch to non-root user
+USER nonroot
+
+# Expose port (Cloud Run will set $PORT dynamically)
+EXPOSE 8080
+ENV PORT=8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Entrypoint with verbose logging
+ENTRYPOINT ["/bin/sh", "-c", "echo 'Quantok Scanner API starting on port $PORT' && exec /app/tlsx-api"]

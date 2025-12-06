@@ -15,6 +15,7 @@ require (
 	github.com/projectdiscovery/gologger v1.1.59
 	github.com/projectdiscovery/mapcidr v1.1.97
 	github.com/projectdiscovery/utils v0.6.0
+	github.com/rs/cors v1.11.1
 	github.com/rs/xid v1.5.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tylertreat/BoomFilters v0.0.0-20250630160909-db6545748bc4
