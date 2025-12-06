@@ -20,9 +20,6 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the tlsx CLI binary (required for API to call)
-RUN go build -ldflags="-s -w" -o /usr/local/bin/tlsx cmd/tlsx/main.go
-
 # Build the API server binary
 RUN go build -ldflags="-s -w" -o tlsx-api cmd/api/main.go
 
@@ -37,9 +34,8 @@ WORKDIR /app
 # Create non-root user
 RUN addgroup -S nonroot && adduser -S -D nonroot -G nonroot
 
-# Copy binaries from builder stage
+# Copy binary from builder stage
 COPY --from=builder --chown=nonroot:nonroot /app/tlsx-api /app/tlsx-api
-COPY --from=builder --chown=nonroot:nonroot /usr/local/bin/tlsx /usr/local/bin/tlsx
 
 # Switch to non-root user
 USER nonroot

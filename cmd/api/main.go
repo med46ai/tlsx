@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -35,22 +34,6 @@ type ScanResponse struct {
 	Error             string   `json:"error,omitempty"`
 }
 
-type TLSXOutput struct {
-	Host       string `json:"host"`
-	Port       string `json:"port"`
-	TLSVersion string `json:"tls_version"`
-	Cipher     string `json:"cipher"`
-	IssuerCN   string `json:"issuer_cn"`
-	NotAfter   string `json:"not_after"`
-	CipherEnum []struct {
-		Version string `json:"version"`
-		Ciphers struct {
-			Secure []string `json:"secure"`
-			Weak   []string `json:"weak"`
-		} `json:"ciphers"`
-	} `json:"cipher_enum"`
-}
-
 func scanHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -79,53 +62,81 @@ func scanHandler(w http.ResponseWriter, r *http.Request) {
 
 func performScan(target string) ScanResponse {
 	_ = output.New
-	_ = tlsx.New
-	_ = clients.Options{}
+	_ = exec.Command
 
 	response := ScanResponse{Target: target}
 
-	cmd := exec.Command("tlsx", "-u", target, "-json", "-silent", "-cn", "-cipher-enum")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Setup tlsx options
+	opts := &clients.Options{
+		TLSVersion: true,
+		Timeout:    10,
+		Retries:    2,
+		ScanMode:   "auto",
+	}
 
-	if err := cmd.Run(); err != nil {
-		log.Printf("tlsx error: %v, stderr: %s", err, stderr.String())
+	// Create tlsx service
+	service, err := tlsx.New(opts)
+	if err != nil {
+		log.Printf("Failed to create tlsx service: %v", err)
+		response.Error = fmt.Sprintf("Service initialization failed: %v", err)
+		return response
+	}
+
+	// Extract host and port
+	host := target
+	port := "443"
+	if strings.Contains(target, ":") {
+		parts := strings.Split(target, ":")
+		if len(parts) == 2 {
+			host = parts[0]
+			port = parts[1]
+		}
+	}
+
+	// Connect to the target
+	tlsxResp, err := service.Connect(host, "", port)
+	if err != nil {
+		log.Printf("Connection failed for %s: %v", target, err)
 		response.Error = fmt.Sprintf("Scan failed: %v", err)
 		return response
 	}
 
-	var tlsxOut TLSXOutput
-	if err := json.Unmarshal(stdout.Bytes(), &tlsxOut); err != nil {
-		log.Printf("JSON parse error: %v, output: %s", err, stdout.String())
-		response.Error = fmt.Sprintf("Parse failed: %v", err)
-		return response
+	response.TLSVersion = tlsxResp.Version
+	response.CertificateIssuer = tlsxResp.IssuerCN
+
+	if !tlsxResp.NotAfter.IsZero() {
+		response.CertificateExpiry = tlsxResp.NotAfter.Format(time.RFC3339)
 	}
 
-	response.TLSVersion = tlsxOut.TLSVersion
-	response.CertificateIssuer = tlsxOut.IssuerCN
-	response.CertificateExpiry = tlsxOut.NotAfter
-
-	// Collect all ciphers from cipher_enum
-	cipherMap := make(map[string]bool)
-	for _, ce := range tlsxOut.CipherEnum {
-		for _, c := range ce.Ciphers.Secure {
-			cipherMap[c] = true
-		}
-		for _, c := range ce.Ciphers.Weak {
-			cipherMap[c] = true
-		}
+	// Get cipher information from the response
+	if tlsxResp.Cipher != "" {
+		response.Cipher = append(response.Cipher, tlsxResp.Cipher)
 	}
-	for c := range cipherMap {
-		response.Cipher = append(response.Cipher, c)
+
+	// Add ciphers from TlsCiphers enumeration if available
+	if len(tlsxResp.TlsCiphers) > 0 {
+		cipherMap := make(map[string]bool)
+		for _, tc := range tlsxResp.TlsCiphers {
+			for _, c := range tc.Ciphers.Secure {
+				cipherMap[c] = true
+			}
+			for _, c := range tc.Ciphers.Weak {
+				cipherMap[c] = true
+			}
+		}
+		// Replace response.Cipher with all enumerated ciphers
+		response.Cipher = make([]string, 0, len(cipherMap))
+		for c := range cipherMap {
+			response.Cipher = append(response.Cipher, c)
+		}
 	}
 
 	// PQ support: TLS 1.3 + modern ciphers (AESGCM or CHACHA20)
-	isTLS13 := strings.Contains(strings.ToLower(tlsxOut.TLSVersion), "1.3")
+	isTLS13 := strings.Contains(strings.ToLower(response.TLSVersion), "1.3")
 	hasModernCipher := false
 	for _, c := range response.Cipher {
-		cLower := strings.ToUpper(c)
-		if strings.Contains(cLower, "AESGCM") || strings.Contains(cLower, "CHACHA20") {
+		cUpper := strings.ToUpper(c)
+		if strings.Contains(cUpper, "AESGCM") || strings.Contains(cUpper, "CHACHA20") {
 			hasModernCipher = true
 			break
 		}
@@ -137,7 +148,7 @@ func performScan(target string) ScanResponse {
 		response.Grade = "A"
 	} else if isTLS13 {
 		response.Grade = "B"
-	} else if strings.Contains(strings.ToLower(tlsxOut.TLSVersion), "1.2") {
+	} else if strings.Contains(strings.ToLower(response.TLSVersion), "1.2") {
 		response.Grade = "C"
 	} else {
 		response.Grade = "D"
